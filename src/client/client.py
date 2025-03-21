@@ -1,12 +1,20 @@
 # Import required libraries for federated learning client
 import flwr as fl
 import torch
+from torch import nn
 import numpy as np
 from collections import OrderedDict
 from typing import Dict, List, Tuple
 from src.models.fraud_detector import FraudDetector
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
+from pathlib import Path
+import argparse
+import logging
+from ..utils.data_preprocessor import process_all_banks, DataPreprocessor
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class FraudDetectionClient(fl.client.NumPyClient):
     """
@@ -15,21 +23,75 @@ class FraudDetectionClient(fl.client.NumPyClient):
     Implements the Flower NumPyClient interface for federated learning.
     """
 
-    def __init__(self, model: FraudDetector, train_data: tuple, test_data: tuple):
-        """
-        Initialize the federated learning client.
-
-        Args:
-            model (FraudDetector): Neural network model for fraud detection
-            train_data (tuple): Training data as (features, labels)
-            test_data (tuple): Testing data as (features, labels)
-        """
-        self.model = model
-        self.train_data = train_data  # (X_train, y_train)
-        self.test_data = test_data    # (X_test, y_test)
-        # Use GPU if available, otherwise CPU
+    def __init__(self, client_id: int, data_dir: str):
+        self.client_id = client_id
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
+
+        # Load and preprocess data
+        self.load_and_preprocess_data(data_dir)
+
+        # Initialize model
+        input_dim = len(self.X_train[0])
+        self.model = self.create_model(input_dim).to(self.device)
+
+        logger.info(f"Client {client_id} initialized with {len(self.X_train)} training samples")
+
+    def load_and_preprocess_data(self, data_dir: str):
+        """Load and preprocess data for this client."""
+        # Process all bank data
+        combined_df, stats = process_all_banks(data_dir)
+        logger.info(f"Processed data from {len(stats)} banks")
+
+        # Split data for this client
+        n_clients = 3  # Total number of clients
+        n_samples = len(combined_df)
+        samples_per_client = n_samples // n_clients
+
+        # Get this client's portion of data
+        start_idx = self.client_id * samples_per_client
+        end_idx = start_idx + samples_per_client if self.client_id < n_clients - 1 else n_samples
+
+        client_df = combined_df.iloc[start_idx:end_idx].copy()
+        logger.info(f"Client {self.client_id} loaded {len(client_df)} transactions")
+
+        # Calculate fraud based on score
+        fraud_threshold = client_df['FraudScore'].quantile(0.95)  # Top 5% as fraud
+        client_df['isFraud'] = (client_df['FraudScore'] > fraud_threshold).astype(int)
+
+        # Split features and target
+        feature_columns = [col for col in client_df.columns if col.endswith('_normalized') or col.endswith('_encoded')]
+        X = client_df[feature_columns].values
+        y = client_df['isFraud'].values
+
+        # Split into train and test
+        train_size = int(0.8 * len(X))
+        self.X_train = X[:train_size]
+        self.y_train = y[:train_size]
+        self.X_test = X[train_size:]
+        self.y_test = y[train_size:]
+
+        # Convert to tensors
+        self.X_train = torch.FloatTensor(self.X_train).to(self.device)
+        self.y_train = torch.FloatTensor(self.y_train).to(self.device)
+        self.X_test = torch.FloatTensor(self.X_test).to(self.device)
+        self.y_test = torch.FloatTensor(self.y_test).to(self.device)
+
+        # Log data statistics
+        n_fraud = np.sum(y)
+        logger.info(f"Client {self.client_id}: Identified {n_fraud} fraudulent transactions ({n_fraud/len(y)*100:.2f}%)")
+        logger.info(f"Training on {len(self.X_train)} samples, Testing on {len(self.X_test)} samples")
+
+    def create_model(self, input_dim: int) -> nn.Module:
+        """Create the neural network model."""
+        return nn.Sequential(
+            nn.Linear(input_dim, 32),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(16, 1)
+        )
 
     def get_parameters(self, config):
         """
@@ -70,7 +132,7 @@ class FraudDetectionClient(fl.client.NumPyClient):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
 
         # Calculate class weights to handle imbalance (with dampening)
-        X_train, y_train = self.train_data
+        X_train, y_train = self.X_train, self.y_train
         pos_weight = min(((1 - y_train.mean()) / y_train.mean()) * 0.5, 10.0)  # Dampen and cap the weight
         criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
 
@@ -123,20 +185,11 @@ class FraudDetectionClient(fl.client.NumPyClient):
         """
         self.set_parameters(parameters)
 
-        # Prepare test data
-        X_test, y_test = self.test_data
-        X_test = torch.FloatTensor(X_test).to(self.device)
-        y_test = torch.FloatTensor(y_test).to(self.device)
-
-        # Use the same weighted loss as in training
-        pos_weight = min(((1 - y_test.mean()) / y_test.mean()) * 0.5, 10.0)
-        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
-
         # Evaluation mode
         self.model.eval()
         with torch.no_grad():
-            outputs = self.model(X_test)
-            loss = criterion(outputs, y_test.view(-1, 1))
+            outputs = self.model(self.X_test)
+            loss = criterion(outputs, self.y_test.view(-1, 1))
 
             # Apply sigmoid to get probabilities
             probabilities = torch.sigmoid(outputs)
@@ -152,10 +205,10 @@ class FraudDetectionClient(fl.client.NumPyClient):
                 predictions = (probabilities > threshold).float()
 
                 # Calculate metrics
-                tp = ((predictions == 1) & (y_test.view(-1, 1) == 1)).sum().item()
-                tn = ((predictions == 0) & (y_test.view(-1, 1) == 0)).sum().item()
-                fp = ((predictions == 1) & (y_test.view(-1, 1) == 0)).sum().item()
-                fn = ((predictions == 0) & (y_test.view(-1, 1) == 1)).sum().item()
+                tp = ((predictions == 1) & (self.y_test.view(-1, 1) == 1)).sum().item()
+                tn = ((predictions == 0) & (self.y_test.view(-1, 1) == 0)).sum().item()
+                fp = ((predictions == 1) & (self.y_test.view(-1, 1) == 0)).sum().item()
+                fn = ((predictions == 0) & (self.y_test.view(-1, 1) == 1)).sum().item()
 
                 # Calculate balanced metrics
                 precision = tp / (tp + fp) if (tp + fp) > 0 else 0
@@ -171,7 +224,7 @@ class FraudDetectionClient(fl.client.NumPyClient):
                 # Current metrics
                 current_metrics = {
                     "threshold": threshold.item(),
-                    "accuracy": (tp + tn) / len(y_test),
+                    "accuracy": (tp + tn) / len(self.y_test),
                     "balanced_accuracy": balanced_acc,
                     "precision": precision,
                     "recall": recall,
@@ -214,110 +267,20 @@ class FraudDetectionClient(fl.client.NumPyClient):
             print(f"True Negatives: {best_metrics['true_negatives']}")
             print(f"False Negatives: {best_metrics['false_negatives']}")
 
-        return float(best_metrics['balanced_accuracy']), len(X_test), best_metrics
+        return float(best_metrics['balanced_accuracy']), len(self.X_test), best_metrics
 
-def load_and_preprocess_data(data_path: str, client_id: int, num_clients: int):
-    """
-    Load and preprocess data for a specific client.
+def main():
+    parser = argparse.ArgumentParser(description='Federated Learning Client for Fraud Detection')
+    parser.add_argument('--client_id', type=int, required=True, help='Client ID')
+    parser.add_argument('--data_dir', type=str, default='data', help='Directory containing bank data files')
+    parser.add_argument('--server_address', type=str, default='[::]:8080', help='Server address')
+    args = parser.parse_args()
 
-    Args:
-        data_path (str): Path to the dataset
-        client_id (int): ID of the current client
-        num_clients (int): Total number of clients
+    # Create client
+    client = FraudDetectionClient(args.client_id, args.data_dir)
 
-    Returns:
-        tuple: ((X_train, y_train), (X_test, y_test))
-    """
-    # Load data from CSV file
-    df = pd.read_csv(data_path)
-    print(f"Client {client_id}: Loaded {len(df)} transactions")
-
-    # Create fraud label based on transaction patterns with weighted criteria
-    amount_threshold = df['TransactionAmount'].quantile(0.90)
-    duration_threshold = df['TransactionDuration'].quantile(0.90)
-    balance_threshold = df['AccountBalance'].quantile(0.10)
-
-    # Assign weights to different criteria based on their importance
-    fraud_score = (
-        2.0 * (df['TransactionAmount'] > amount_threshold).astype(float) +  # High amount is strong indicator
-        1.5 * (df['LoginAttempts'] > 2).astype(float) +                    # Multiple login attempts
-        1.0 * (df['TransactionDuration'] > duration_threshold).astype(float) + # Long duration
-        1.5 * (df['AccountBalance'] < balance_threshold).astype(float)      # Low balance is concerning
-    )
-
-    # Mark as fraud if weighted score exceeds threshold
-    fraud_threshold = 2.5  # Requires combination of strong indicators
-    df['fraud_label'] = (fraud_score >= fraud_threshold).astype(int)
-
-    fraud_count = df['fraud_label'].sum()
-    print(f"Client {client_id}: Identified {fraud_count} fraudulent transactions ({fraud_count/len(df)*100:.2f}%)")
-
-    # Select and weight features for the model based on importance
-    feature_columns = [
-        'TransactionAmount',    # Most important
-        'LoginAttempts',        # Very important
-        'AccountBalance',       # Important
-        'TransactionDuration',  # Moderately important
-        'CustomerAge'           # Less important
-    ]
-
-    # Extract features and target
-    X = df[feature_columns]
-    y = df['fraud_label']
-
-    # Standardize features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    # Calculate data split for this client
-    total_samples = len(X_scaled)
-    samples_per_client = total_samples // num_clients
-    start_idx = client_id * samples_per_client
-    end_idx = start_idx + samples_per_client
-
-    # Get this client's portion of data
-    X_client = X_scaled[start_idx:end_idx]
-    y_client = y[start_idx:end_idx].values
-
-    # Split into train (80%) and test (20%) sets
-    split_idx = int(0.8 * len(X_client))
-    X_train, X_test = X_client[:split_idx], X_client[split_idx:]
-    y_train, y_test = y_client[:split_idx], y_client[split_idx:]
-
-    print(f"Client {client_id}: Training on {len(X_train)} samples, Testing on {len(X_test)} samples")
-    return (X_train, y_train), (X_test, y_test)
-
-def start_client(data_path: str, client_id: int, num_clients: int, server_address: str = "127.0.0.1:8081"):
-    """
-    Initialize and start a federated learning client.
-
-    Args:
-        data_path (str): Path to the dataset
-        client_id (int): ID of this client
-        num_clients (int): Total number of clients
-        server_address (str): Address of the federated learning server
-    """
-    # Load and preprocess data for this client
-    train_data, test_data = load_and_preprocess_data(data_path, client_id, num_clients)
-
-    # Initialize fraud detection model
-    input_dim = train_data[0].shape[1]  # Number of features
-    model = FraudDetector(input_dim=input_dim)
-
-    # Create federated learning client
-    client = FraudDetectionClient(model, train_data, test_data)
-
-    # Start client and connect to server
-    fl.client.start_numpy_client(server_address=server_address, client=client)
+    # Start client
+    fl.client.start_numpy_client(args.server_address, client=client)
 
 if __name__ == "__main__":
-    # Parse command line arguments
-    import argparse
-    parser = argparse.ArgumentParser(description='Start a Flower client for fraud detection')
-    parser.add_argument('--client_id', type=int, required=True)
-    parser.add_argument('--num_clients', type=int, required=True)
-    parser.add_argument('--data_path', type=str, required=True)
-    parser.add_argument('--server_address', type=str, default="127.0.0.1:8081")
-
-    args = parser.parse_args()
-    start_client(args.data_path, args.client_id, args.num_clients, args.server_address)
+    main()
