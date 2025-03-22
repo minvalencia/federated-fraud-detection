@@ -1,230 +1,241 @@
 # Fraud Detection API Documentation
 
 ## Overview
-This API service provides comprehensive fraud detection capabilities for bank transaction data, including data preprocessing, model training, and fraud prediction. It features intelligent column mapping, data validation, and detailed fraud analysis.
-
-## Base URL
-```
-https://your-app-name.onrender.com
-```
+This API provides endpoints for processing bank transaction data and detecting potential fraud using machine learning. The API supports file upload, data processing, model training, and fraud prediction.
 
 ## Authentication
-All endpoints require API key authentication:
-```
-X-API-Key: your-api-key-here
-```
+All endpoints (except `/health`) require API token authentication.
+
+**Header Required:**
+- Key: `X-API-Key`
+- Value: Your API token
 
 ## Endpoints
 
-### Data Upload and Processing
+### 1. Health Check
+```http
+GET /health
+```
+Check if the API is running.
 
-#### Upload File
-- **POST** `/upload/`
-- Uploads and analyzes a bank transaction file
-- Request: `multipart/form-data` with file
-- Response:
+**Response:**
 ```json
 {
-    "status": "success",
-    "filename": "bank_data_20250315_123456.csv",
-    "total_rows": 1000,
-    "column_mapping": {
-        "TransactionAmount": "amount",
-        "TransactionDuration": "duration",
-        "LoginAttempts": "attempts",
-        "AccountBalance": "balance",
-        "CustomerAge": "age"
-    },
-    "mapping_coverage": 0.8,
-    "invalid_columns": [],
-    "missing_required_columns": []
+    "status": "healthy",
+    "timestamp": "2025-03-22T12:00:00.000Z"
 }
 ```
 
-#### Validate Mapping
-- **GET** `/validate/{filename}`
-- Validates column mapping and provides data statistics
-- Parameters:
-  - `mapping`: Dictionary of column mappings
-- Response:
+### 2. Upload File
+```http
+POST /upload
+```
+Upload a CSV file containing transaction data.
+
+**Request:**
+- Form-data with key "file" and a CSV file value
+
+**Response:**
 ```json
 {
-    "status": "success",
-    "invalid_columns": [],
-    "statistics": {
+    "filename": "bank_data_20250322_010056.csv",
+    "columns": ["Transaction_Amount", "Account_Balance", "Age", ...],
+    "rows": 2512,
+    "message": "File uploaded successfully"
+}
+```
+
+### 3. Validate Mapping
+```http
+GET /validate/{filename}
+```
+Validate the uploaded file and automatically map columns.
+
+**Response:**
+```json
+{
+    "mapped_columns": {
+        "TransactionAmount": "Transaction_Amount",
+        "AccountBalance": "Account_Balance",
+        ...
+    },
+    "numeric_validation": {
+        "invalid_columns": [],
+        "valid_columns": ["TransactionAmount", "AccountBalance", ...]
+    },
+    "data_stats": {
         "TransactionAmount": {
-            "mean": 1000.50,
-            "median": 750.25,
-            "min": 10.00,
-            "max": 5000.00,
+            "mean": 1000.0,
+            "min": 10.0,
+            "max": 5000.0,
             "null_count": 0
-        }
+        },
+        ...
     }
 }
 ```
 
-#### Process File
-- **POST** `/process/{filename}`
-- Processes file using provided column mapping
-- Request:
+### 4. Process File
+```http
+POST /process/{filename}
+```
+Process the file and prepare it for fraud detection.
+
+**Request Body:**
 ```json
 {
     "mapping": {
-        "TransactionAmount": "amount",
-        "TransactionDuration": "duration"
+        "TransactionAmount": "Transaction_Amount",
+        "AccountBalance": "Account_Balance",
+        "CustomerAge": "Age",
+        "TransactionDuration": "Duration",
+        "LoginAttempts": "Attempts"
     }
 }
 ```
-- Response:
+
+**Response:**
 ```json
 {
     "status": "success",
-    "processed_filename": "processed_bank_data.csv",
-    "rows_processed": 1000,
-    "columns_standardized": ["TransactionAmount", "TransactionDuration"]
+    "processed_filename": "processed_bank_data_20250322_010056.csv",
+    "rows_processed": 2512,
+    "columns_standardized": ["TransactionAmount", "amount_normalized", ...],
+    "fraud_statistics": {
+        "total_transactions": 2512,
+        "fraud_transactions": 75,
+        "fraud_percentage": 2.98
+    }
 }
 ```
 
-### Machine Learning Operations
+### 5. Train Model
+```http
+POST /train/{filename}
+```
+Train the fraud detection model on processed data.
 
-#### Train Model
-- **POST** `/train/{filename}`
-- Trains the fraud detection model on processed data
-- Response:
+**Response:**
 ```json
 {
     "status": "success",
     "message": "Model trained successfully",
     "training_stats": {
-        "losses": [0.6932, 0.5421, 0.4120, 0.3856]
+        "losses": [0.6932, 0.3245, 0.2156, ...]
+    },
+    "details": {
+        "features_used": ["amount_normalized", "duration_normalized", ...],
+        "total_samples": 2512,
+        "fraud_samples": 75,
+        "fraud_percentage": 2.98
     }
 }
 ```
 
-#### Predict Fraud
-- **POST** `/predict/{filename}`
-- Parameters:
-  - `threshold` (float, optional): Probability threshold (default: 0.5)
-- Makes fraud predictions with detailed analysis
-- Response:
+### 6. Predict Fraud
+```http
+POST /predict/{filename}
+```
+Make fraud predictions on processed data.
+
+**Request Body:**
+```json
+{
+    "threshold": 0.3
+}
+```
+
+**Response:**
 ```json
 {
     "status": "success",
-    "output_filename": "predictions_bank_data.csv",
     "predictions_summary": {
-        "total_transactions": 1000,
-        "fraud_detected": 50,
-        "legitimate_transactions": 950,
-        "fraud_percentage": 5.0,
+        "total_transactions": 2512,
+        "fraud_detected": 75,
+        "legitimate_transactions": 2437,
+        "fraud_percentage": 2.98,
         "probability_stats": {
             "mean": 0.15,
-            "median": 0.08,
-            "std": 0.25,
+            "median": 0.12,
+            "std": 0.18,
             "min": 0.01,
-            "max": 0.98
-        },
-        "confidence_stats": {
-            "avg_fraud_confidence": 0.85,
-            "avg_legitimate_confidence": 0.92
-        },
-        "threshold_used": 0.5
-    },
-    "validation_status": "All validations passed",
-    "fraud_transactions": {
-        "count": 50,
-        "details": [
-            {
-                "index": 123,
-                "probability": 0.98,
-                "normalized_features": {
-                    "amount_normalized": 2.5,
-                    "duration_normalized": 1.8,
-                    "attempts_normalized": 3.2,
-                    "balance_normalized": -0.5,
-                    "age_normalized": 0.2
-                },
-                "transaction_data": {
-                    "TransactionAmount": 5000.00,
-                    "TransactionDuration": 120,
-                    "LoginAttempts": 5,
-                    "AccountBalance": 1000.00,
-                    "CustomerAge": 35,
-                    "TransactionType": "wire_transfer"
-                }
+            "max": 0.95,
+            "percentiles": {
+                "25": 0.05,
+                "75": 0.25,
+                "90": 0.45,
+                "95": 0.65,
+                "99": 0.85
             }
-        ]
+        }
+    },
+    "fraud_transactions": {
+        "total_count": 75,
+        "details_shown": 75,
+        "details": [...]
     }
 }
 ```
 
-#### Evaluate Model
-- **GET** `/evaluate/{filename}`
-- Evaluates model performance on processed data
-- Response:
+### 7. List Files
+```http
+GET /files/
+```
+List all uploaded and processed files.
+
+**Response:**
 ```json
 {
-    "status": "success",
-    "metrics": {
-        "accuracy": 0.95,
-        "precision": 0.85,
-        "recall": 0.78,
-        "f1_score": 0.81,
-        "true_positives": 45,
-        "false_positives": 5,
-        "true_negatives": 940,
-        "false_negatives": 10
-    }
+    "files": [
+        {
+            "filename": "bank_data_20250322_010056.csv",
+            "size_bytes": 1234567,
+            "uploaded_at": "2025-03-22T01:00:56",
+            "is_processed": false
+        },
+        {
+            "filename": "processed_bank_data_20250322_010056.csv",
+            "size_bytes": 2345678,
+            "uploaded_at": "2025-03-22T01:01:30",
+            "is_processed": true
+        }
+    ]
 }
 ```
 
-#### Model Status
-- **GET** `/model/status`
-- Gets current model status and configuration
-- Response:
+### 8. Model Status
+```http
+GET /model/status
+```
+Get the current status of the fraud detection model.
+
+**Response:**
 ```json
 {
     "status": "success",
     "model_info": {
         "input_dimensions": 5,
-        "device": "cuda",
+        "device": "cpu",
         "model_file_exists": true,
         "scaler_file_exists": true
     }
 }
 ```
 
-### File Management
-
-#### List Files
-- **GET** `/files/`
-- Lists all uploaded and processed files
-- Response:
-```json
-{
-    "files": [
-        {
-            "filename": "bank_data_20250315.csv",
-            "size_bytes": 1024000,
-            "uploaded_at": "2025-03-15T12:34:56",
-            "is_processed": false
-        }
-    ]
-}
-```
-
 ## Error Handling
-All endpoints use consistent error responses:
-```json
-{
-    "detail": "Error message description"
-}
-```
-
-Common status codes:
+The API returns appropriate HTTP status codes:
 - 200: Success
-- 400: Bad Request
+- 400: Bad Request (invalid input)
+- 401: Unauthorized (invalid/missing API token)
 - 404: Not Found
 - 500: Internal Server Error
+
+Error responses include a detail message explaining the error:
+```json
+{
+    "detail": "Error message here"
+}
+```
 
 ## Data Requirements
 

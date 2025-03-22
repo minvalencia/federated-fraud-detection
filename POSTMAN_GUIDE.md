@@ -1,263 +1,257 @@
-# Fraud Detection API - Postman Guide
+# Postman Guide for Fraud Detection API
 
-## Prerequisites
-1. Install Postman from [https://www.postman.com/downloads/](https://www.postman.com/downloads/)
-2. Ensure the Fraud Detection API is running (default: `http://localhost:8000`)
-3. Have your API token ready
+## Setup
 
-## Setup in Postman
+1. **Import Collection**
+   - Open Postman
+   - Click "Import" button
+   - Import the provided collection file
 
-### 1. Create a New Collection
-1. Open Postman
-2. Click "Collections" in the sidebar
-3. Click "+" to create a new collection
-4. Name it "Fraud Detection API"
+2. **Environment Setup**
+   - Create a new environment
+   - Add the following variables:
+     ```
+     BASE_URL: http://localhost:8000
+     API_KEY: your_api_key_here
+     ```
 
-### 2. Set Collection Variables
-1. Click on the collection
-2. Go to "Variables" tab
-3. Add the following variables:
-   ```
-   base_url: http://localhost:8000
-   api_token: your-api-token
-   ```
+## Authentication
 
-### 3. Set Collection Authorization
-1. Go to "Authorization" tab
-2. Type: "API Key"
-3. Key: "X-API-Key"
-4. Value: "{{api_token}}"
-5. Add to: "Header"
-
-## API Endpoints Guide
-
-### 1. Get API Token
-```http
-GET {{base_url}}/token
+All requests (except health check) require the API key in the header:
 ```
-- No authentication required
-- Save the returned token as your `api_token` variable
+X-API-Key: {{API_KEY}}
+```
 
-### 2. Upload Transaction Data
+## Request Examples
+
+### 1. Health Check
 ```http
-POST {{base_url}}/upload/
+GET {{BASE_URL}}/health
+```
+No authentication required.
+
+### 2. Upload File
+```http
+POST {{BASE_URL}}/upload
 ```
 **Headers:**
-- X-API-Key: {{api_token}}
-
+```
+X-API-Key: {{API_KEY}}
+```
 **Body:**
 - Form-data
-- Key: "file"
-- Value: Select your CSV file
-- Type: file
+- Key: `file`
+- Value: Select CSV file
 
-**Example Response:**
-```json
-{
-    "filename": "transactions_20240321.csv",
-    "status": "success"
-}
-```
-
-### 3. Process Uploaded File
+### 3. Validate Mapping
 ```http
-POST {{base_url}}/process/{filename}
+GET {{BASE_URL}}/validate/bank_data_20250322_010056.csv
 ```
 **Headers:**
-- X-API-Key: {{api_token}}
-- Content-Type: application/json
+```
+X-API-Key: {{API_KEY}}
+```
 
+### 4. Process File
+```http
+POST {{BASE_URL}}/process/bank_data_20250322_010056.csv
+```
+**Headers:**
+```
+X-API-Key: {{API_KEY}}
+Content-Type: application/json
+```
 **Body:**
 ```json
 {
-    "column_mapping": {
-        "amount": "Transaction_Amount",
-        "balance": "Account_Balance",
-        "age": "Age",
-        "device": "Device_Type",
-        "location": "Transaction_Location",
-        "time": "Transaction_Time",
-        "device_details": "Transaction_Device"
+    "mapping": {
+        "TransactionAmount": "Transaction_Amount",
+        "AccountBalance": "Account_Balance",
+        "CustomerAge": "Age",
+        "TransactionDuration": "Duration",
+        "LoginAttempts": "Attempts"
     }
 }
 ```
 
-**Example Response:**
+### 5. Train Model
+```http
+POST {{BASE_URL}}/train/processed_bank_data_20250322_010056.csv
+```
+**Headers:**
+```
+X-API-Key: {{API_KEY}}
+```
+
+### 6. Predict Fraud
+```http
+POST {{BASE_URL}}/predict/processed_bank_data_20250322_010056.csv
+```
+**Headers:**
+```
+X-API-Key: {{API_KEY}}
+Content-Type: application/json
+```
+**Body:**
 ```json
 {
-    "status": "success",
-    "processed_rows": 1000,
-    "standardized_columns": [
-        "amount_normalized",
-        "balance_normalized",
-        "age_normalized",
-        "device_encoded",
-        "location_encoded"
-    ]
+    "threshold": 0.3
 }
 ```
 
-### 4. Make Fraud Predictions
+### 7. List Files
 ```http
-POST {{base_url}}/predict/{filename}
+GET {{BASE_URL}}/files/
 ```
 **Headers:**
-- X-API-Key: {{api_token}}
-- Content-Type: application/json
+```
+X-API-Key: {{API_KEY}}
+```
 
-**Query Parameters:**
-- threshold: 0.5 (optional)
+### 8. Model Status
+```http
+GET {{BASE_URL}}/model/status
+```
+**Headers:**
+```
+X-API-Key: {{API_KEY}}
+```
 
-**Example Response:**
+## Testing Workflow
+
+1. **Initial Setup**
+   - Verify health check endpoint is working
+   - Ensure API key is correctly set in environment
+
+2. **Data Upload and Processing**
+   ```
+   Upload File → Validate Mapping → Process File
+   ```
+   - Upload your transaction data
+   - Validate the column mapping
+   - Process the file with correct mapping
+
+3. **Model Training and Prediction**
+   ```
+   Train Model → Model Status → Predict Fraud
+   ```
+   - Train the model on processed data
+   - Verify model status
+   - Make predictions with desired threshold
+
+4. **File Management**
+   ```
+   List Files → Check Processed Files
+   ```
+   - Monitor uploaded and processed files
+   - Clean up old files if needed
+
+## Response Examples
+
+### Successful Upload Response
+```json
+{
+    "filename": "bank_data_20250322_010056.csv",
+    "columns": ["Transaction_Amount", "Account_Balance", "Age", ...],
+    "rows": 2512,
+    "message": "File uploaded successfully"
+}
+```
+
+### Successful Processing Response
 ```json
 {
     "status": "success",
-    "output_filename": "predictions_transactions_20240321.csv",
+    "processed_filename": "processed_bank_data_20250322_010056.csv",
+    "rows_processed": 2512,
+    "columns_standardized": ["TransactionAmount", "amount_normalized", ...],
+    "fraud_statistics": {
+        "total_transactions": 2512,
+        "fraud_transactions": 75,
+        "fraud_percentage": 2.98
+    }
+}
+```
+
+### Successful Prediction Response
+```json
+{
+    "status": "success",
     "predictions_summary": {
-        "total_transactions": 1000,
-        "fraud_detected": 50,
-        "fraud_percentage": 5.0,
+        "total_transactions": 2512,
+        "fraud_detected": 75,
+        "legitimate_transactions": 2437,
+        "fraud_percentage": 2.98,
         "probability_stats": {
             "mean": 0.15,
             "median": 0.12,
-            "std": 0.2
-        }
-    },
-    "fraud_transactions": {
-        "count": 50,
-        "details": [
-            {
-                "index": 42,
-                "probability": 0.95,
-                "normalized_features": {
-                    "amount_normalized": 2.5,
-                    "balance_normalized": -1.2,
-                    "age_normalized": 0.8,
-                    "attempts_normalized": 2.1
-                },
-                "transaction_data": {
-                    "Transaction_Amount": 5000.00,
-                    "Account_Balance": 1000.00,
-                    "Age": 35,
-                    "Device_Type": "Mobile"
-                }
+            "std": 0.18,
+            "min": 0.01,
+            "max": 0.95,
+            "percentiles": {
+                "25": 0.05,
+                "75": 0.25,
+                "90": 0.45,
+                "95": 0.65,
+                "99": 0.85
             }
-        ]
+        }
     }
 }
 ```
-
-### 5. Get Model Metrics
-```http
-GET {{base_url}}/evaluate/{filename}
-```
-**Headers:**
-- X-API-Key: {{api_token}}
-
-**Example Response:**
-```json
-{
-    "status": "success",
-    "metrics": {
-        "accuracy": 0.93,
-        "precision": 0.93,
-        "recall": 0.87,
-        "f1_score": 0.89,
-        "true_positives": 435,
-        "false_positives": 32,
-        "true_negatives": 4892,
-        "false_negatives": 65
-    }
-}
-```
-
-## Testing Steps
-
-1. **Initial Setup**
-   - Create the collection
-   - Set variables
-   - Set authorization
-
-2. **Get API Token**
-   - Send GET request to /token
-   - Copy token to collection variables
-
-3. **Upload Data**
-   - Select a CSV file
-   - Send POST request to /upload/
-   - Save returned filename
-
-4. **Process Data**
-   - Use filename from previous step
-   - Send POST request to /process/{filename}
-   - Verify processing success
-
-5. **Make Predictions**
-   - Use processed filename
-   - Send POST request to /predict/{filename}
-   - Review fraud predictions
-
-6. **Evaluate Results**
-   - Send GET request to /evaluate/{filename}
-   - Review model performance metrics
 
 ## Error Handling
 
-Common HTTP Status Codes:
-- 200: Success
-- 400: Bad Request (invalid data/parameters)
-- 401: Unauthorized (invalid/missing token)
-- 404: Not Found (file not found)
-- 422: Validation Error (invalid input format)
-- 500: Server Error
+Common error responses and their meanings:
 
-Example Error Response:
-```json
-{
-    "detail": "Error message describing the problem"
-}
-```
+1. **401 Unauthorized**
+   ```json
+   {
+       "detail": "Invalid or missing API token"
+   }
+   ```
+   - Check API key is correct
+   - Verify header is properly set
+
+2. **400 Bad Request**
+   ```json
+   {
+       "detail": "Error processing CSV file: Missing required column"
+   }
+   ```
+   - Verify input data format
+   - Check column mapping
+
+3. **404 Not Found**
+   ```json
+   {
+       "detail": "File not found"
+   }
+   ```
+   - Verify file exists
+   - Check filename spelling
 
 ## Best Practices
 
-1. **File Naming**
-   - Use descriptive filenames
-   - Include date/time in filename
-   - Avoid special characters
+1. **Environment Management**
+   - Use separate environments for development/production
+   - Never hardcode API keys
+   - Use variables for repeated values
 
-2. **Data Validation**
-   - Verify CSV format
-   - Check required columns
-   - Validate data types
+2. **Testing**
+   - Test with various data sizes
+   - Verify error handling
+   - Check response formats
+   - Monitor processing times
 
-3. **Error Handling**
-   - Check response status
-   - Log error messages
-   - Implement retry logic
+3. **Data Preparation**
+   - Use valid CSV format
+   - Include required columns
+   - Clean data before upload
+   - Keep reasonable file sizes
 
-4. **Performance**
-   - Use batch processing for large files
-   - Monitor response times
-   - Implement rate limiting
-
-## Troubleshooting
-
-1. **Authentication Issues**
-   - Verify token is correct
-   - Check token expiration
-   - Ensure proper header format
-
-2. **File Upload Issues**
-   - Check file size limits
-   - Verify file format
-   - Ensure proper form-data
-
-3. **Processing Errors**
-   - Verify column mapping
-   - Check data format
-   - Review error messages
-
-4. **Prediction Issues**
-   - Check threshold values
-   - Verify feature names
-   - Review input data quality
+4. **Security**
+   - Keep API key secure
+   - Use HTTPS in production
+   - Monitor access logs
+   - Regular security audits

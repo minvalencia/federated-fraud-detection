@@ -1,211 +1,105 @@
-# Fraud Detection System Implementation Details
+# Fraud Detection API Implementation Details
 
-## Overview
+## Architecture Overview
 
-This document provides a detailed explanation of the fraud detection system implementation, including the reasoning behind architectural decisions, implementation choices, and the advantages of the chosen approach.
+### Tech Stack
+- **Framework**: FastAPI
+- **Language**: Python 3.8
+- **Deployment**: Docker
+- **ML Framework**: PyTorch
+- **Data Processing**: Pandas, NumPy
 
-## Table of Contents
-
-1. [System Architecture](#system-architecture)
-2. [Technologies Used](#technologies-used)
-3. [Implementation Details](#implementation-details)
-4. [Reasoning Behind Choices](#reasoning-behind-choices)
-5. [Advantages](#advantages)
-6. [Data Dictionary](#data-dictionary)
-7. [Technical Specifications](#technical-specifications)
-8. [Cloud Deployment (Render)](#cloud-deployment-render)
+### Directory Structure
+```
+.
+├── data/
+│   ├── uploads/         # Uploaded and processed files
+│   └── api_token.txt    # API token storage
+├── models/
+│   └── fraud_detector.pt # Trained model weights
+├── src/
+│   ├── api/
+│   │   ├── main.py      # FastAPI application
+│   │   └── ml_model.py  # ML model implementation
+│   └── utils/           # Utility functions
+├── tests/               # Unit and integration tests
+├── docker-compose.yml   # Docker configuration
+└── Dockerfile          # Container definition
+```
 
 ## Technologies Used
 
 ### 1. Core Technologies
-- **Python 3.8+**: Main programming language
-- **FastAPI**: Modern, high-performance web framework
+- **Python 3.8+**: Main programming language for the entire application
+- **FastAPI**: Modern, high-performance web framework for building APIs
 - **PyTorch**: Deep learning framework for neural network implementation
-- **Docker**: Containerization and deployment
-- **PostgreSQL**: Database for storing transaction data (optional)
+- **Docker**: Containerization and deployment management
+- **Docker Compose**: Multi-container Docker applications orchestration
 
 ### 2. Machine Learning Stack
-- **PyTorch (1.10+)**: Neural network implementation
+- **PyTorch (1.10+)**: Neural network implementation and training
 - **NumPy**: Numerical computations and array operations
-- **Pandas**: Data manipulation and analysis
-- **Scikit-learn**: Data preprocessing and model evaluation
-- **Joblib**: Model persistence and loading
+- **Pandas**: Data manipulation, processing, and analysis
+- **Scikit-learn**: Data preprocessing and model evaluation metrics
+- **Joblib**: Model persistence and efficient loading
 
 ### 3. API Development
-- **FastAPI**: REST API framework
+- **FastAPI**: REST API framework with automatic OpenAPI documentation
 - **Pydantic**: Data validation and settings management
-- **Uvicorn**: ASGI server implementation
+- **Uvicorn**: ASGI server implementation for FastAPI
 - **Starlette**: Web toolkit for middleware and responses
-- **Python-multipart**: File upload handling
+- **Python-multipart**: File upload handling and processing
 
 ### 4. Development Tools
-- **Docker**: Containerization
-- **Docker Compose**: Multi-container orchestration
-- **Git**: Version control
-- **Black**: Code formatting
-- **Flake8**: Code linting
-- **Pytest**: Testing framework
+- **Black**: Code formatting for consistent style
+- **Flake8**: Code linting and style checking
+- **Pytest**: Testing framework for unit and integration tests
+- **Coverage**: Code coverage reporting
+- **Pre-commit**: Git hooks for code quality checks
 
 ### 5. Monitoring and Logging
-- **Prometheus**: Metrics collection
-- **Grafana**: Metrics visualization
-- **Python logging**: Application logging
-- **JSON logging**: Structured log format
+- **Prometheus**: Metrics collection and storage
+- **Grafana**: Metrics visualization and dashboards
+- **Python logging**: Application logging with rotating file handlers
+- **JSON logging**: Structured log format for better parsing
+- **OpenTelemetry**: Distributed tracing and monitoring
 
 ### 6. Security
-- **Python-jose**: JWT token handling
-- **Passlib**: Password hashing
-- **Bcrypt**: Password hashing algorithm
-- **TLS/SSL**: Secure communication
+- **Python-jose**: JWT token handling and validation
+- **Passlib**: Password hashing and verification
+- **Bcrypt**: Password hashing algorithm implementation
+- **TLS/SSL**: Secure communication protocols
+- **Rate limiting**: Request throttling for API protection
 
-### 7. Cloud Deployment (Render)
-- **Render**: Cloud platform for deployment
-  - **Web Service**: Hosts the FastAPI application
-  - **Disk**: Persistent storage for model files
-  - **Environment**: Python runtime environment
-  - **Auto-deploy**: Automatic deployment from Git
+### 7. Data Storage
+- **File System**: Local storage for uploaded and processed files
+- **Redis**: Optional caching layer for improved performance
+- **PostgreSQL**: Optional database for persistent storage
+- **S3-compatible**: Optional cloud storage for scalability
 
-#### Render Configuration
-```yaml
-# render.yaml
-services:
-  - type: web
-    name: fraud-detection-api
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.8.0
-      - key: DEBUG
-        value: false
-      - key: API_TOKEN
-        sync: false
-    disk:
-      name: model-storage
-      mountPath: /app/models
-      sizeGB: 10
-```
+## Core Components
 
-#### Render Deployment Features
-1. **Automatic HTTPS**:
-   - SSL/TLS certificates
-   - Secure communication
-   - Custom domains support
+### 1. Data Processing Pipeline
+- **Column Mapping**: Intelligent mapping of input columns to standardized names
+- **Data Validation**: Checks for required columns and data types
+- **Normalization**: Z-score normalization with clipping to (-5, 5)
+- **Synthetic Fraud Labels**: Generated based on known fraud patterns:
+  - High amount transactions (> 2x mean)
+  - Amount close to account balance (> 80%)
+  - Multiple login attempts for elderly customers
+  - Quick large transactions
+  - Random noise (2%) to prevent overfitting
 
-2. **Scaling**:
-   - Auto-scaling capabilities
-   - Resource management
-   - Load balancing
-
-3. **Monitoring**:
-   - Built-in metrics
-   - Log management
-   - Performance tracking
-
-4. **CI/CD Integration**:
-   - GitHub integration
-   - Automatic deployments
-   - Branch deployments
-
-5. **Environment Management**:
-   - Secret management
-   - Environment variables
-   - Configuration management
-
-#### Render vs Traditional Deployment
-| Feature | Render | Traditional |
-|---------|--------|-------------|
-| Setup Time | Minutes | Hours/Days |
-| SSL | Automatic | Manual |
-| Scaling | Automatic | Manual |
-| Deployment | Git-based | Manual/Scripts |
-| Monitoring | Built-in | Custom Setup |
-| Cost | Usage-based | Fixed/Variable |
-
-## System Architecture
-
-### High-Level Architecture
-
-```
-┌─────────────────┐
-│    FastAPI      │
-│    Service      │
-└───────┬─────────┘
-        │
-┌───────┴─────────┐
-│  Data           │
-│  Preprocessing  │
-└───────┬─────────┘
-        │
-┌───────┴─────────┐
-│  Neural Network │
-│  Model          │
-└───────┬─────────┘
-        │
-┌───────┴─────────┐
-│  Prediction     │
-│  Explanation    │
-└─────────────────┘
-```
-
-### Components
-
-1. **API Layer (FastAPI)**
-   - RESTful endpoints
-   - File upload handling
-   - Authentication
-   - Request validation
-
-2. **Data Processing Layer**
-   - Column mapping
-   - Feature engineering
-   - Data normalization
-   - Fraud score calculation
-
-3. **Model Layer**
-   - Neural network architecture
-   - Training pipeline
-   - Prediction logic
-   - Model persistence
-
-4. **Explanation Layer**
-   - Feature importance
-   - Decision factors
-   - Confidence metrics
-   - Threshold analysis
-
-## Implementation Details
-
-### 1. Data Processing Implementation
-
-```python
-def _calculate_fraud_score(self, df: pd.DataFrame) -> pd.Series:
-    score = pd.Series(0, index=df.index)
-
-    # Transaction amount risk (2.0x weight)
-    score += 2.0 * (df['AmountPercentile'] > 0.9)
-
-    # Login attempts risk (1.5x weight)
-    score += 1.5 * (df['LoginAttempts'] > 2)
-
-    # Transaction duration risk (1.0x weight)
-    score += 1.0 * (df['TransactionDuration'] > df['TransactionDuration'].quantile(0.9))
-
-    # Balance ratio risk (1.5x weight)
-    score += 1.5 * (df['BalanceRatio'] > df['BalanceRatio'].quantile(0.9))
-
-    return score
-```
-
-### 2. Neural Network Architecture
-
+### 2. ML Model Architecture
 ```python
 class FraudDetector(nn.Module):
-    def __init__(self, input_dim: int = 4):
-        super(FraudDetector, self).__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(input_dim, 64),
+    def __init__(self):
+        super().__init__()
+        self.input_dim = 15  # 5 original + 5 interaction + 5 combination features
+
+        # Network architecture
+        self.model = nn.Sequential(
+            nn.Linear(15, 64),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(64, 32),
@@ -218,172 +112,157 @@ class FraudDetector(nn.Module):
         )
 ```
 
-### 3. API Implementation
+### Training Performance
 
-```python
-@app.post("/predict/{filename}")
-async def predict_fraud(
-    filename: str,
-    threshold: float = 0.5,
-    token: str = Depends(verify_token)
-):
-    # Load and validate data
-    df = pd.read_csv(file_path)
-    X = df[model_manager.expected_features].values
+#### Time Estimates
+- **Small Dataset** (< 10,000 transactions):
+  - Initial training: 1-2 minutes
+  - Fine-tuning: 30-45 seconds
+  - Memory usage: ~200MB
 
-    # Make predictions with detailed explanation
-    prediction_result = model_manager.predict(
-        X,
-        threshold,
-        feature_names=model_manager.expected_features
-    )
+- **Medium Dataset** (10,000 - 100,000 transactions):
+  - Initial training: 3-5 minutes
+  - Fine-tuning: 1-2 minutes
+  - Memory usage: ~500MB
 
-    return {
-        "status": "success",
-        "predictions": prediction_result
-    }
-```
+- **Large Dataset** (100,000 - 1,000,000 transactions):
+  - Initial training: 10-15 minutes
+  - Fine-tuning: 3-5 minutes
+  - Memory usage: ~1.5GB
+  - Recommended batch size: 512
 
-## Reasoning Behind Choices
+#### Training Configuration
+- **Epochs**: 50 (early stopping enabled)
+- **Batch Size**:
+  - Default: 256
+  - Adjustable based on memory constraints
+- **Learning Rate**: 0.001 with Adam optimizer
+- **Early Stopping**: Patience of 5 epochs
+- **Validation Split**: 20% of data
 
-### 1. FastAPI Selection
-- **Why**: FastAPI was chosen for its:
-  - High performance (async support)
-  - Automatic OpenAPI documentation
-  - Built-in validation
-  - Modern Python features (type hints)
-  - Easy deployment
+#### Hardware Requirements
+- **Minimum**:
+  - CPU: 2 cores
+  - RAM: 4GB
+  - Storage: 1GB free space
 
-### 2. Neural Network Architecture
-- **Why**: Multi-layer perceptron with dropout was chosen for:
-  - Ability to learn complex patterns
-  - Good generalization
-  - Handling non-linear relationships
-  - Resistance to overfitting
-  - Probabilistic outputs
+- **Recommended**:
+  - CPU: 4+ cores
+  - RAM: 8GB+
+  - Storage: 5GB+ free space
+  - GPU: Optional, provides 2-3x speedup
 
-### 3. Scoring System
-- **Why**: Weighted scoring approach because:
-  - Transparent decision-making
-  - Easy to adjust weights
-  - Combines multiple risk factors
-  - Interpretable results
+#### Performance Optimization
+- Batch processing for large datasets
+- Data preprocessing in chunks
+- GPU acceleration when available
+- Caching of preprocessed features
+- Parallel data loading with multiple workers
 
-### 4. Data Processing
-- **Why**: Comprehensive preprocessing because:
-  - Handles various data formats
-  - Robust feature engineering
-  - Standardized outputs
-  - Quality control
+### 3. Feature Engineering
+- **Original Features**:
+  - Transaction Amount (normalized)
+  - Transaction Duration (normalized)
+  - Login Attempts (normalized)
+  - Account Balance (normalized)
+  - Customer Age (normalized)
+- **Interaction Features**: Pairwise combinations
+- **Combination Features**: Complex patterns
 
-## Advantages
+### 4. API Security
+- Token-based authentication
+- Rate limiting
+- Input validation
+- Secure file handling
+- Error handling with appropriate status codes
 
-### 1. Technical Advantages
-- **Scalability**
-  - Async processing
-  - Batch prediction support
-  - Efficient data handling
-  - Docker containerization
+### 5. Data Flow
+1. **File Upload**:
+   - Validates file format (CSV)
+   - Generates unique filename with timestamp
+   - Stores in uploads directory
 
-- **Maintainability**
-  - Modular architecture
-  - Clear separation of concerns
-  - Comprehensive documentation
-  - Type hints throughout
+2. **Data Processing**:
+   - Maps columns to standard format
+   - Validates numeric data
+   - Calculates global statistics
+   - Applies normalization
+   - Generates synthetic fraud labels
 
-- **Reliability**
-  - Extensive error handling
-  - Input validation
-  - Data quality checks
-  - Automated testing
+3. **Model Training**:
+   - Extracts normalized features
+   - Splits data into training/validation
+   - Trains neural network
+   - Saves model weights
 
-### 2. Business Advantages
-- **Fraud Detection**
-  - High accuracy
-  - Low false positives
-  - Real-time processing
-  - Adjustable thresholds
+4. **Prediction**:
+   - Loads trained model
+   - Processes input data
+   - Makes predictions
+   - Returns detailed analysis
 
-- **Explainability**
-  - Feature importance
-  - Decision factors
-  - Confidence metrics
-  - Audit trail
+## Performance Considerations
 
-- **Flexibility**
-  - Multiple data sources
-  - Configurable parameters
-  - Easy integration
-  - API-first design
+### 1. Memory Management
+- Batch processing for large files
+- Efficient DataFrame operations
+- Cleanup of temporary files
+- Response size limiting (max 100 detailed results)
 
-## Data Dictionary
+### 2. Error Handling
+- Graceful failure handling
+- Detailed error messages
+- Automatic cleanup on failure
+- Transaction rollback where appropriate
 
-### Input Features
+### 3. Scalability
+- Docker containerization
+- Stateless API design
+- Efficient file storage
+- Caching where appropriate
 
-| Feature Name | Type | Description | Format | Example |
-|--------------|------|-------------|---------|---------|
-| Transaction_Amount | Float | Amount of transaction | Decimal | 1000.00 |
-| Account_Balance | Float | Current account balance | Decimal | 5000.00 |
-| Age | Integer | Customer age | Years | 35 |
-| Device_Type | String | Device used for transaction | Text | "Mobile" |
-| Transaction_Location | String | Location of transaction | Text | "New York" |
-| Transaction_Time | String | Time of transaction | HH:MM:SS | "14:30:00" |
-| Transaction_Device | String | Specific device details | Text | "iPhone" |
+## Monitoring and Logging
 
-### Derived Features
+### 1. API Metrics
+- Request/response times
+- Error rates
+- File processing statistics
+- Model performance metrics
 
-| Feature Name | Type | Description | Calculation |
-|--------------|------|-------------|-------------|
-| AmountPercentile | Float | Transaction amount percentile | Calculated from historical data |
-| LoginAttempts | Integer | Number of login attempts | Count of attempts within timeframe |
-| TransactionDuration | Float | Time taken for transaction | End time - Start time |
-| BalanceRatio | Float | Transaction amount to balance ratio | Amount / Balance |
+### 2. Model Metrics
+- Training losses
+- Validation metrics
+- Prediction distributions
+- Feature importance
 
-### Output Features
+### 3. System Metrics
+- CPU/Memory usage
+- Disk space
+- Network bandwidth
+- Container health
 
-| Feature Name | Type | Description | Range |
-|--------------|------|-------------|--------|
-| fraud_probability | Float | Probability of fraud | 0.0 - 1.0 |
-| is_fraud | Boolean | Fraud classification | True/False |
-| fraud_score | Float | Composite risk score | 0.0 - 10.0 |
-| key_factors | Array | Important decision factors | List of strings |
+## Future Improvements
 
-## Technical Specifications
+1. **Model Enhancements**:
+   - Additional feature engineering
+   - Model versioning
+   - Online learning capabilities
+   - Ensemble methods
 
-### API Endpoints
+2. **API Enhancements**:
+   - Batch prediction endpoint
+   - Real-time monitoring dashboard
+   - Advanced analytics endpoints
+   - Model retraining triggers
 
-| Endpoint | Method | Purpose | Authentication |
-|----------|---------|---------|----------------|
-| /upload/ | POST | Upload transaction data | Required |
-| /process/{filename} | POST | Process uploaded file | Required |
-| /predict/{filename} | POST | Make fraud predictions | Required |
-| /evaluate/{filename} | GET | Get model metrics | Required |
+3. **Infrastructure**:
+   - Horizontal scaling
+   - Load balancing
+   - Distributed processing
+   - Automated backups
 
-### Model Specifications
-
-- **Architecture**: Multi-layer Perceptron
-- **Input Dimensions**: 5 features
-- **Hidden Layers**: 3 layers (64, 32, 16 neurons)
-- **Output**: Single probability (0-1)
-- **Activation**: ReLU (hidden), Sigmoid (output)
-- **Regularization**: Dropout (0.3, 0.2)
-
-### Performance Metrics
-
-| Metric | Target | Actual |
-|--------|--------|--------|
-| Precision | >0.90 | 0.93 |
-| Recall | >0.85 | 0.87 |
-| F1 Score | >0.87 | 0.89 |
-| Processing Time | <100ms | 85ms |
-
-### System Requirements
-
-- Python 3.8+
-- 4GB RAM minimum
-- Docker support
-- FastAPI
-- PyTorch
-- pandas
-- numpy
-- scikit-learn
+4. **Security**:
+   - OAuth2 implementation
+   - Role-based access control
+   - Audit logging
+   - Enhanced encryption
