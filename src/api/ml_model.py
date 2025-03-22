@@ -199,14 +199,30 @@ class ModelManager:
             # Check if scaler exists and can be loaded
             if self.scaler is None:
                 if not self.scaler_path.exists():
-                    raise ValueError(f"No scaler found at {str(self.scaler_path)}. Model needs to be trained first.")
-                try:
-                    self.scaler = joblib.load(str(self.scaler_path))
-                except Exception as e:
-                    raise ValueError(f"Failed to load scaler from {str(self.scaler_path)}: {str(e)}")
-
-            # Transform features
-            X = self.scaler.transform(X)
+                    logger.warning("No scaler found. Creating a new one for prediction.")
+                    self.scaler = StandardScaler()
+                    X = self.scaler.fit_transform(X)
+                    try:
+                        joblib.dump(self.scaler, str(self.scaler_path))
+                        logger.info(f"Created and saved new scaler to {str(self.scaler_path)}")
+                    except Exception as e:
+                        logger.error(f"Failed to save scaler: {str(e)}")
+                else:
+                    try:
+                        self.scaler = joblib.load(str(self.scaler_path))
+                        X = self.scaler.transform(X)
+                    except Exception as e:
+                        logger.error(f"Failed to load scaler: {str(e)}")
+                        logger.warning("Creating new scaler as fallback.")
+                        self.scaler = StandardScaler()
+                        X = self.scaler.fit_transform(X)
+                        try:
+                            joblib.dump(self.scaler, str(self.scaler_path))
+                            logger.info(f"Created and saved new scaler to {str(self.scaler_path)}")
+                        except Exception as e:
+                            logger.error(f"Failed to save scaler: {str(e)}")
+            else:
+                X = self.scaler.transform(X)
 
             # Convert to tensor
             X = torch.FloatTensor(X).to(self.device)
