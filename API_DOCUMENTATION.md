@@ -3,6 +3,11 @@
 ## Overview
 This API provides endpoints for processing bank transaction data and detecting potential fraud using machine learning. The API supports file upload, data processing, model training, and fraud prediction.
 
+## Base URL
+```
+http://localhost:8000
+```
+
 ## Authentication
 All endpoints (except `/health`) require API token authentication.
 
@@ -22,7 +27,7 @@ Check if the API is running.
 ```json
 {
     "status": "healthy",
-    "timestamp": "2025-03-22T12:00:00.000Z"
+    "version": "1.0.0"
 }
 ```
 
@@ -85,11 +90,11 @@ Process the file and prepare it for fraud detection.
 ```json
 {
     "mapping": {
-        "TransactionAmount": "Transaction_Amount",
-        "AccountBalance": "Account_Balance",
-        "CustomerAge": "Age",
-        "TransactionDuration": "Duration",
-        "LoginAttempts": "Attempts"
+        "TransactionAmount": "amount",
+        "TransactionDuration": "duration",
+        "LoginAttempts": "attempts",
+        "AccountBalance": "balance",
+        "CustomerAge": "age"
     }
 }
 ```
@@ -98,14 +103,15 @@ Process the file and prepare it for fraud detection.
 ```json
 {
     "status": "success",
-    "processed_filename": "processed_bank_data_20250322_010056.csv",
+    "processed_filename": "processed_bank_data_20250322.csv",
     "rows_processed": 2512,
-    "columns_standardized": ["TransactionAmount", "amount_normalized", ...],
-    "fraud_statistics": {
-        "total_transactions": 2512,
-        "fraud_transactions": 75,
-        "fraud_percentage": 2.98
-    }
+    "columns_standardized": [
+        "amount_normalized",
+        "duration_normalized",
+        "attempts_normalized",
+        "balance_normalized",
+        "age_normalized"
+    ]
 }
 ```
 
@@ -113,71 +119,68 @@ Process the file and prepare it for fraud detection.
 ```http
 POST /train/{filename}
 ```
-Train the fraud detection model on processed data.
+Train the fraud detection model. This endpoint will:
+1. Create and save a StandardScaler for feature normalization
+2. Train the neural network model
+3. Save both the model and scaler for future predictions
 
 **Response:**
 ```json
 {
     "status": "success",
-    "message": "Model trained successfully",
-    "training_stats": {
-        "losses": [0.6932, 0.3245, 0.2156, ...]
-    },
-    "details": {
-        "features_used": ["amount_normalized", "duration_normalized", ...],
-        "total_samples": 2512,
-        "fraud_samples": 75,
-        "fraud_percentage": 2.98
-    }
+    "message": "Training started",
+    "monitor_url": "/train/status"
 }
 ```
 
-### 6. Predict Fraud
+### 6. Training Status
 ```http
-POST /predict/{filename}
+GET /train/status
 ```
-Make fraud predictions on processed data.
-
-**Request Body:**
-```json
-{
-    "threshold": 0.3
-}
-```
+Get the current status of model training.
 
 **Response:**
 ```json
 {
     "status": "success",
-    "predictions_summary": {
-        "total_transactions": 2512,
-        "fraud_detected": 75,
-        "legitimate_transactions": 2437,
-        "fraud_percentage": 2.98,
-        "probability_stats": {
-            "mean": 0.15,
-            "median": 0.12,
-            "std": 0.18,
-            "min": 0.01,
-            "max": 0.95,
-            "percentiles": {
-                "25": 0.05,
-                "75": 0.25,
-                "90": 0.45,
-                "95": 0.65,
-                "99": 0.85
-            }
-        }
-    },
-    "fraud_transactions": {
-        "total_count": 75,
-        "details_shown": 75,
-        "details": [...]
+    "training_status": {
+        "is_training": false,
+        "progress": 100,
+        "current_epoch": 50,
+        "total_epochs": 50,
+        "current_loss": 0.0123,
+        "best_loss": 0.0120,
+        "message": "Training completed successfully",
+        "start_time": "2025-03-22T13:57:16",
+        "end_time": "2025-03-22T13:58:16"
     }
 }
 ```
 
-### 7. List Files
+### 7. Predict Fraud
+```http
+POST /predict/{filename}?threshold=0.3
+```
+Make fraud predictions on processed data. Requires both model and scaler to be properly trained and saved.
+
+**Query Parameters:**
+- threshold (optional): Classification threshold (default: 0.5)
+
+**Response:**
+```json
+{
+    "status": "success",
+    "predictions": {
+        "fraud_count": 25,
+        "total_transactions": 1000,
+        "fraud_rate": 0.025,
+        "threshold_used": 0.3,
+        "results": [0, 1, 0, ...]
+    }
+}
+```
+
+### 8. List Files
 ```http
 GET /files/
 ```
@@ -203,21 +206,22 @@ List all uploaded and processed files.
 }
 ```
 
-### 8. Model Status
+### 9. Model Status
 ```http
 GET /model/status
 ```
-Get the current status of the fraud detection model.
+Get the current status of the model and its components.
 
 **Response:**
 ```json
 {
     "status": "success",
     "model_info": {
+        "model_file_exists": true,
+        "scaler_file_exists": true,
         "input_dimensions": 5,
         "device": "cpu",
-        "model_file_exists": true,
-        "scaler_file_exists": true
+        "last_training": "2025-03-22T13:58:16"
     }
 }
 ```
@@ -267,7 +271,7 @@ The API supports various column name formats:
 
 ## Rate Limiting
 - 100 requests per minute per API key
-- Rate limit headers included in responses
+- Training endpoints limited to 1 request per minute
 
 ## Support
 - Documentation: https://docs.your-company.com

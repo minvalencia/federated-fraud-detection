@@ -1,268 +1,240 @@
-# Fraud Detection API Implementation Details
+# Fraud Detection System Implementation Details
 
 ## Architecture Overview
 
-### Tech Stack
-- **Framework**: FastAPI
-- **Language**: Python 3.8
-- **Deployment**: Docker
-- **ML Framework**: PyTorch
-- **Data Processing**: Pandas, NumPy
+### 1. System Components
 
-### Directory Structure
-```
-.
-├── data/
-│   ├── uploads/         # Uploaded and processed files
-│   └── api_token.txt    # API token storage
-├── models/
-│   └── fraud_detector.pt # Trained model weights
-├── src/
-│   ├── api/
-│   │   ├── main.py      # FastAPI application
-│   │   └── ml_model.py  # ML model implementation
-│   └── utils/           # Utility functions
-├── tests/               # Unit and integration tests
-├── docker-compose.yml   # Docker configuration
-└── Dockerfile          # Container definition
-```
+1. **API Layer (FastAPI)**
+   - RESTful endpoints for data processing and predictions
+   - Authentication and rate limiting
+   - Request validation and error handling
+   - Asynchronous training support
 
-## Technologies Used
+2. **ML Pipeline**
+   - Data preprocessing and feature engineering
+   - Model training and evaluation
+   - Prediction generation
+   - Model and scaler persistence
 
-### 1. Core Technologies
-- **Python 3.8+**: Main programming language for the entire application
-- **FastAPI**: Modern, high-performance web framework for building APIs
-- **PyTorch**: Deep learning framework for neural network implementation
-- **Docker**: Containerization and deployment management
-- **Docker Compose**: Multi-container Docker applications orchestration
+3. **Storage Layer**
+   - File-based storage for uploaded data
+   - Model and scaler persistence
+   - Training logs and metrics
 
-### 2. Machine Learning Stack
-- **PyTorch (1.10+)**: Neural network implementation and training
-- **NumPy**: Numerical computations and array operations
-- **Pandas**: Data manipulation, processing, and analysis
-- **Scikit-learn**: Data preprocessing and model evaluation metrics
-- **Joblib**: Model persistence and efficient loading
+### 2. Model Architecture
 
-### 3. API Development
-- **FastAPI**: REST API framework with automatic OpenAPI documentation
-- **Pydantic**: Data validation and settings management
-- **Uvicorn**: ASGI server implementation for FastAPI
-- **Starlette**: Web toolkit for middleware and responses
-- **Python-multipart**: File upload handling and processing
+The fraud detection model uses a neural network implemented in PyTorch:
 
-### 4. Development Tools
-- **Black**: Code formatting for consistent style
-- **Flake8**: Code linting and style checking
-- **Pytest**: Testing framework for unit and integration tests
-- **Coverage**: Code coverage reporting
-- **Pre-commit**: Git hooks for code quality checks
-
-### 5. Monitoring and Logging
-- **Prometheus**: Metrics collection and storage
-- **Grafana**: Metrics visualization and dashboards
-- **Python logging**: Application logging with rotating file handlers
-- **JSON logging**: Structured log format for better parsing
-- **OpenTelemetry**: Distributed tracing and monitoring
-
-### 6. Security
-- **Python-jose**: JWT token handling and validation
-- **Passlib**: Password hashing and verification
-- **Bcrypt**: Password hashing algorithm implementation
-- **TLS/SSL**: Secure communication protocols
-- **Rate limiting**: Request throttling for API protection
-
-### 7. Data Storage
-- **File System**: Local storage for uploaded and processed files
-- **Redis**: Optional caching layer for improved performance
-- **PostgreSQL**: Optional database for persistent storage
-- **S3-compatible**: Optional cloud storage for scalability
-
-## Core Components
-
-### 1. Data Processing Pipeline
-- **Column Mapping**: Intelligent mapping of input columns to standardized names
-- **Data Validation**: Checks for required columns and data types
-- **Normalization**: Z-score normalization with clipping to (-5, 5)
-- **Synthetic Fraud Labels**: Generated based on known fraud patterns:
-  - High amount transactions (> 2x mean)
-  - Amount close to account balance (> 80%)
-  - Multiple login attempts for elderly customers
-  - Quick large transactions
-  - Random noise (2%) to prevent overfitting
-
-### 2. ML Model Architecture
 ```python
 class FraudDetector(nn.Module):
     def __init__(self):
-        super().__init__()
-        self.input_dim = 15  # 5 original + 5 interaction + 5 combination features
-
-        # Network architecture
+        super(FraudDetector, self).__init__()
         self.model = nn.Sequential(
-            nn.Linear(15, 64),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, 32),
+            nn.Linear(5, 32),
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(32, 16),
             nn.ReLU(),
-            nn.Linear(16, 1),
+            nn.Dropout(0.2),
+            nn.Linear(16, 8),
+            nn.ReLU(),
+            nn.Linear(8, 1),
             nn.Sigmoid()
         )
 ```
 
-### Training Performance
+Key features:
+- 5 input features (normalized transaction attributes)
+- 3 hidden layers with dropout for regularization
+- Sigmoid activation for binary classification
+- BCELoss for training
 
-#### Time Estimates
-- **Small Dataset** (< 10,000 transactions):
-  - Initial training: 1-2 minutes
-  - Fine-tuning: 30-45 seconds
-  - Memory usage: ~200MB
+### 3. Data Processing Pipeline
 
-- **Medium Dataset** (10,000 - 100,000 transactions):
-  - Initial training: 3-5 minutes
-  - Fine-tuning: 1-2 minutes
-  - Memory usage: ~500MB
+1. **Feature Engineering**
+   - Robust scaling for numerical features
+   - Feature importance weighting
+   - Automated missing value handling
+   - Outlier detection and handling
 
-- **Large Dataset** (100,000 - 1,000,000 transactions):
-  - Initial training: 10-15 minutes
-  - Fine-tuning: 3-5 minutes
-  - Memory usage: ~1.5GB
-  - Recommended batch size: 512
+2. **Data Validation**
+   - Schema validation
+   - Data type checking
+   - Range validation
+   - Missing value detection
 
-#### Training Configuration
-- **Epochs**: 50 (early stopping enabled)
-- **Batch Size**:
-  - Default: 256
-  - Adjustable based on memory constraints
-- **Learning Rate**: 0.001 with Adam optimizer
-- **Early Stopping**: Patience of 5 epochs
-- **Validation Split**: 20% of data
+3. **Feature Normalization**
+   ```python
+   def _normalize_features(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
+       numerical_features = [
+           'TransactionAmount',
+           'TransactionDuration',
+           'AccountBalance',
+           'CustomerAge'
+       ]
 
-#### Hardware Requirements
-- **Minimum**:
-  - CPU: 2 cores
-  - RAM: 4GB
-  - Storage: 1GB free space
+       scaling_params = {}
+       for feature in numerical_features:
+           median = df[feature].median()
+           q1 = df[feature].quantile(0.25)
+           q3 = df[feature].quantile(0.75)
+           iqr = q3 - q1
 
-- **Recommended**:
-  - CPU: 4+ cores
-  - RAM: 8GB+
-  - Storage: 5GB+ free space
-  - GPU: Optional, provides 2-3x speedup
+           scaling_params[feature] = {
+               'median': median,
+               'iqr': iqr
+           }
 
-#### Performance Optimization
-- Batch processing for large datasets
-- Data preprocessing in chunks
-- GPU acceleration when available
-- Caching of preprocessed features
-- Parallel data loading with multiple workers
+           df[f'{feature}_normalized'] = (df[feature] - median) / iqr
 
-### 3. Feature Engineering
-- **Original Features**:
-  - Transaction Amount (normalized)
-  - Transaction Duration (normalized)
-  - Login Attempts (normalized)
-  - Account Balance (normalized)
-  - Customer Age (normalized)
-- **Interaction Features**: Pairwise combinations
-- **Combination Features**: Complex patterns
+       return df, scaling_params
+   ```
 
-### 4. API Security
-- Token-based authentication
-- Rate limiting
-- Input validation
-- Secure file handling
-- Error handling with appropriate status codes
+### 4. Model Management
 
-### 5. Data Flow
-1. **File Upload**:
-   - Validates file format (CSV)
-   - Generates unique filename with timestamp
-   - Stores in uploads directory
+1. **Model Persistence**
+   - Models saved in `/app/models` directory
+   - Versioning support for model files
+   - Automatic backup before updates
+   ```python
+   def save_model(self):
+       self.model.save(self.model_path)
+       joblib.dump(self.scaler, str(self.scaler_path))
+   ```
 
-2. **Data Processing**:
-   - Maps columns to standard format
-   - Validates numeric data
-   - Calculates global statistics
-   - Applies normalization
-   - Generates synthetic fraud labels
+2. **Scaler Handling**
+   - StandardScaler for feature normalization
+   - Persistent storage in models directory
+   - Automatic reloading on prediction
+   ```python
+   if self.scaler is None:
+       if not self.scaler_path.exists():
+           raise ValueError(f"No scaler found at {str(self.scaler_path)}")
+       self.scaler = joblib.load(str(self.scaler_path))
+   ```
 
-3. **Model Training**:
-   - Extracts normalized features
-   - Splits data into training/validation
-   - Trains neural network
-   - Saves model weights
+3. **Training Management**
+   - Asynchronous training support
+   - Progress monitoring
+   - Early stopping implementation
+   - Training status persistence
 
-4. **Prediction**:
-   - Loads trained model
-   - Processes input data
-   - Makes predictions
-   - Returns detailed analysis
+### 5. Docker Deployment
 
-## Performance Considerations
+1. **Container Configuration**
+   ```dockerfile
+   FROM python:3.8-slim
 
-### 1. Memory Management
-- Batch processing for large files
-- Efficient DataFrame operations
-- Cleanup of temporary files
-- Response size limiting (max 100 detailed results)
+   ENV PYTHONDONTWRITEBYTECODE=1 \
+       PYTHONUNBUFFERED=1 \
+       CUDA_VISIBLE_DEVICES="" \
+       FORCE_CPU=1
 
-### 2. Error Handling
-- Graceful failure handling
-- Detailed error messages
-- Automatic cleanup on failure
-- Transaction rollback where appropriate
+   WORKDIR /app
 
-### 3. Scalability
-- Docker containerization
-- Stateless API design
-- Efficient file storage
-- Caching where appropriate
+   # Create directories with proper permissions
+   RUN mkdir -p /app/uploads /app/models /app/data && \
+       chmod 777 /app/models
 
-## Monitoring and Logging
+   # Create non-root user
+   RUN useradd -m -u 1000 appuser && \
+       chown -R appuser:appuser /app
 
-### 1. API Metrics
-- Request/response times
-- Error rates
-- File processing statistics
-- Model performance metrics
+   USER appuser
+   ```
 
-### 2. Model Metrics
-- Training losses
-- Validation metrics
-- Prediction distributions
-- Feature importance
+2. **Volume Management**
+   - Persistent storage for models
+   - Data volume for uploads
+   - Log volume for monitoring
+   ```yaml
+   volumes:
+     - ./models:/app/models
+     - ./data:/app/data
+     - ./logs:/app/logs
+   ```
 
-### 3. System Metrics
-- CPU/Memory usage
-- Disk space
-- Network bandwidth
-- Container health
+3. **Security Considerations**
+   - Non-root user execution
+   - Minimal base image
+   - Environment variable management
+   - Volume permission handling
 
-## Future Improvements
+### 6. Error Handling
 
-1. **Model Enhancements**:
-   - Additional feature engineering
-   - Model versioning
-   - Online learning capabilities
-   - Ensemble methods
+1. **Validation Errors**
+   - Input data validation
+   - Feature range checking
+   - Missing value detection
+   ```python
+   def validate_features(self, X: np.ndarray) -> Tuple[bool, str]:
+       if X.shape[1] != self.input_dim:
+           return False, f"Expected {self.input_dim} features"
+       if not np.isfinite(X).all():
+           return False, "Input contains NaN or infinite values"
+       return True, "Validation successful"
+   ```
 
-2. **API Enhancements**:
-   - Batch prediction endpoint
-   - Real-time monitoring dashboard
-   - Advanced analytics endpoints
-   - Model retraining triggers
+2. **Model Errors**
+   - Training failures
+   - Prediction errors
+   - Resource unavailability
+   ```python
+   try:
+       predictions = self.model(X)
+   except Exception as e:
+       logger.error(f"Prediction error: {str(e)}")
+       raise ValueError(f"Failed to generate predictions: {str(e)}")
+   ```
 
-3. **Infrastructure**:
-   - Horizontal scaling
-   - Load balancing
-   - Distributed processing
-   - Automated backups
+3. **System Errors**
+   - File I/O errors
+   - Memory issues
+   - GPU availability
+   ```python
+   try:
+       self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+   except Exception as e:
+       logger.warning(f"GPU error: {str(e)}. Falling back to CPU.")
+       self.device = torch.device('cpu')
+   ```
 
-4. **Security**:
-   - OAuth2 implementation
-   - Role-based access control
-   - Audit logging
-   - Enhanced encryption
+### 7. Monitoring and Logging
+
+1. **Application Metrics**
+   - Request latency
+   - Error rates
+   - Model performance
+   - Resource utilization
+
+2. **Model Metrics**
+   - Training loss
+   - Validation metrics
+   - Prediction distribution
+   - Feature importance
+
+3. **System Metrics**
+   - CPU/Memory usage
+   - Disk I/O
+   - Network traffic
+   - Container health
+
+### 8. Performance Optimization
+
+1. **Model Optimization**
+   - Batch prediction support
+   - CPU/GPU optimization
+   - Memory management
+   - Caching strategy
+
+2. **API Optimization**
+   - Async processing
+   - Connection pooling
+   - Response compression
+   - Rate limiting
+
+3. **Storage Optimization**
+   - File cleanup
+   - Data archival
+   - Cache management
+   - Volume monitoring
