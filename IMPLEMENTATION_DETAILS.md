@@ -49,177 +49,229 @@ Key features:
 - Sigmoid activation for binary classification
 - BCELoss for training
 
-### 3. Data Processing Pipeline
+### 3. Training Process
 
-1. **Feature Engineering**
-   - Robust scaling for numerical features
-   - Feature importance weighting
-   - Automated missing value handling
-   - Outlier detection and handling
+#### Data Preprocessing
+```python
+# Features are normalized using StandardScaler
+numerical_features = [
+    'TransactionAmount',
+    'TransactionDuration',
+    'AccountBalance',
+    'CustomerAge'
+]
+# Each feature is normalized using median and IQR
+df[f'{feature}_normalized'] = (df[feature] - median) / iqr
+```
 
-2. **Data Validation**
-   - Schema validation
-   - Data type checking
-   - Range validation
-   - Missing value detection
+#### Synthetic Fraud Label Generation
+The system uses several patterns to generate synthetic fraud labels:
+```python
+def generate_fraud_label(row, stats):
+    # Pattern 1: High amount transactions
+    if transaction_amount > amount_mean * 2:
+        is_fraud = True
 
-3. **Feature Normalization**
-   ```python
-   def _normalize_features(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
-       numerical_features = [
-           'TransactionAmount',
-           'TransactionDuration',
-           'AccountBalance',
-           'CustomerAge'
-       ]
+    # Pattern 2: Amount > 80% of balance
+    if transaction_amount > account_balance * 0.8:
+        is_fraud = True
 
-       scaling_params = {}
-       for feature in numerical_features:
-           median = df[feature].median()
-           q1 = df[feature].quantile(0.25)
-           q3 = df[feature].quantile(0.75)
-           iqr = q3 - q1
+    # Pattern 3: Elderly customers with multiple login attempts
+    if login_attempts > 3 and customer_age > 60:
+        is_fraud = True
 
-           scaling_params[feature] = {
-               'median': median,
-               'iqr': iqr
-           }
+    # Pattern 4: Quick large transactions
+    if transaction_amount > amount_mean * 1.5 and duration < duration_mean * 0.3:
+        is_fraud = True
 
-           df[f'{feature}_normalized'] = (df[feature] - median) / iqr
+    # Add random noise to prevent overfitting
+    if np.random.random() < 0.02:  # 2% random flip
+        is_fraud = not is_fraud
 
-       return df, scaling_params
-   ```
+    return float(is_fraud)
+```
 
-### 4. Model Management
+#### Training Configuration
+```python
+# Optimizer and loss function
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+criterion = nn.BCELoss()  # Binary Cross Entropy Loss
 
-1. **Model Persistence**
-   - Models saved in `/app/models` directory
-   - Versioning support for model files
-   - Automatic backup before updates
-   ```python
-   def save_model(self):
-       self.model.save(self.model_path)
-       joblib.dump(self.scaler, str(self.scaler_path))
-   ```
+# Training loop with early stopping
+for epoch in range(epochs):
+    model.train()
+    optimizer.zero_grad()
+    outputs = model(X)
+    loss = criterion(outputs, y)
+    loss.backward()
+    optimizer.step()
 
-2. **Scaler Handling**
-   - StandardScaler for feature normalization
-   - Persistent storage in models directory
-   - Automatic reloading on prediction
-   ```python
-   if self.scaler is None:
-       if not self.scaler_path.exists():
-           raise ValueError(f"No scaler found at {str(self.scaler_path)}")
-       self.scaler = joblib.load(str(self.scaler_path))
-   ```
+    # Early stopping check
+    if avg_epoch_loss < best_loss:
+        best_loss = avg_epoch_loss
+        patience_counter = 0
+    else:
+        patience_counter += 1
+        if patience_counter >= patience:
+            print(f"Early stopping at epoch {epoch+1}")
+            break
+```
 
-3. **Training Management**
-   - Asynchronous training support
-   - Progress monitoring
-   - Early stopping implementation
-   - Training status persistence
+### 4. Prediction Process
 
-### 5. Docker Deployment
+#### Feature Processing
+```python
+# Normalize input features using saved scaler
+X = self.scaler.transform(X)
+X = torch.FloatTensor(X).to(self.device)
+```
 
-1. **Container Configuration**
-   ```dockerfile
-   FROM python:3.8-slim
+#### Dynamic Threshold Adjustment
+```python
+# Make predictions with dynamic threshold
+with torch.no_grad():
+    outputs = model(X)
+    probabilities = outputs.cpu().numpy()
 
-   ENV PYTHONDONTWRITEBYTECODE=1 \
-       PYTHONUNBUFFERED=1 \
-       CUDA_VISIBLE_DEVICES="" \
-       FORCE_CPU=1
+    # Calculate dynamic threshold adjustment based on distribution
+    prob_mean = np.mean(probabilities)
+    prob_std = np.std(probabilities)
 
-   WORKDIR /app
+    # Adjust threshold if the fraud rate would be unreasonably high
+    estimated_fraud_rate = np.mean(probabilities >= threshold)
+    if estimated_fraud_rate > 0.20:  # If fraud rate would be > 20%
+        # Use a dynamic threshold based on distribution
+        dynamic_threshold = max(
+            threshold,
+            min(
+                prob_mean + prob_std,  # Upper bound
+                0.5  # Default maximum threshold
+            )
+        )
+```
 
-   # Create directories with proper permissions
-   RUN mkdir -p /app/uploads /app/models /app/data && \
-       chmod 777 /app/models
+#### Prediction Explanation
+```python
+def explain_prediction(self, features, prediction, probability):
+    # Calculate feature importance using gradients
+    gradients = x.grad.abs().numpy()
+    importance = gradients / gradients.sum()
 
-   # Create non-root user
-   RUN useradd -m -u 1000 appuser && \
-       chown -R appuser:appuser /app
+    # Create explanation
+    explanation = {
+        'prediction': 'Fraudulent' if prediction == 1 else 'Legitimate',
+        'confidence': f"{probability * 100:.2f}%",
+        'feature_importance': {
+            'transaction_amount': float(importance[0]),
+            'account_balance': float(importance[1]),
+            'age': float(importance[2]),
+            'login_attempts': float(importance[3])
+        }
+    }
+```
 
-   USER appuser
-   ```
+### 5. Performance Metrics
 
-2. **Volume Management**
-   - Persistent storage for models
-   - Data volume for uploads
-   - Log volume for monitoring
-   ```yaml
-   volumes:
-     - ./models:/app/models
-     - ./data:/app/data
-     - ./logs:/app/logs
-   ```
+The system calculates various metrics for model evaluation:
+```python
+def calculate_metrics(predictions, true_labels):
+    # Calculate basic metrics
+    tp = ((predictions == 1) & (true_labels == 1)).sum()
+    tn = ((predictions == 0) & (true_labels == 0)).sum()
+    fp = ((predictions == 1) & (true_labels == 0)).sum()
+    fn = ((predictions == 0) & (true_labels == 1)).sum()
 
-3. **Security Considerations**
-   - Non-root user execution
-   - Minimal base image
-   - Environment variable management
-   - Volume permission handling
+    # Calculate derived metrics
+    metrics = {
+        'precision': tp / (tp + fp),
+        'recall': tp / (tp + fn),
+        'specificity': tn / (tn + fp),
+        'f1_score': 2 * (precision * recall) / (precision + recall)
+    }
+    return metrics
+```
 
-### 6. Error Handling
+### 6. Federated Learning Support
 
-1. **Validation Errors**
-   - Input data validation
-   - Feature range checking
-   - Missing value detection
-   ```python
-   def validate_features(self, X: np.ndarray) -> Tuple[bool, str]:
-       if X.shape[1] != self.input_dim:
-           return False, f"Expected {self.input_dim} features"
-       if not np.isfinite(X).all():
-           return False, "Input contains NaN or infinite values"
-       return True, "Validation successful"
-   ```
+The system supports federated learning across multiple banks:
 
-2. **Model Errors**
-   - Training failures
-   - Prediction errors
-   - Resource unavailability
-   ```python
-   try:
-       predictions = self.model(X)
-   except Exception as e:
-       logger.error(f"Prediction error: {str(e)}")
-       raise ValueError(f"Failed to generate predictions: {str(e)}")
-   ```
+1. **Client Implementation**
+```python
+class FraudDetectionClient(fl.client.NumPyClient):
+    def fit(self, parameters, config):
+        # Update model with server parameters
+        self.set_parameters(parameters)
 
-3. **System Errors**
-   - File I/O errors
-   - Memory issues
-   - GPU availability
-   ```python
-   try:
-       self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-   except Exception as e:
-       logger.warning(f"GPU error: {str(e)}. Falling back to CPU.")
-       self.device = torch.device('cpu')
-   ```
+        # Train on local data
+        optimizer = torch.optim.Adam(self.model.parameters())
+        criterion = torch.nn.BCEWithLogitsLoss()
 
-### 7. Monitoring and Logging
+        # Return updated parameters
+        return self.get_parameters(), len(X_train), metrics
+```
 
-1. **Application Metrics**
-   - Request latency
-   - Error rates
-   - Model performance
-   - Resource utilization
+2. **Server Configuration**
+```python
+strategy = fl.server.strategy.FedAvg(
+    fraction_fit=1.0,  # 100% of clients participate
+    min_fit_clients=2,
+    min_available_clients=2
+)
+```
 
-2. **Model Metrics**
-   - Training loss
-   - Validation metrics
-   - Prediction distribution
-   - Feature importance
+### 7. API Usage
 
-3. **System Metrics**
-   - CPU/Memory usage
-   - Disk I/O
-   - Network traffic
-   - Container health
+1. **Upload Data**
+```http
+POST /upload
+Content-Type: multipart/form-data
+X-API-Key: your-api-token
+```
 
-### 8. Performance Optimization
+2. **Process Data**
+```http
+POST /process/{filename}
+Content-Type: application/json
+X-API-Key: your-api-token
+```
+
+3. **Train Model**
+```http
+POST /train/{filename}
+X-API-Key: your-api-token
+```
+
+4. **Make Predictions**
+```http
+POST /predict
+Content-Type: application/json
+X-API-Key: your-api-token
+```
+
+### 8. System Safeguards
+
+1. **Early Stopping**
+   - Prevents overfitting
+   - Monitors validation loss
+   - Implements patience mechanism
+
+2. **Dynamic Threshold Adjustment**
+   - Adapts to data distribution
+   - Prevents excessive false positives
+   - Maintains reasonable fraud detection rate
+
+3. **Feature Importance Analysis**
+   - Gradient-based importance calculation
+   - Explains model decisions
+   - Helps in feature selection
+
+4. **Error Handling**
+   - Input validation
+   - Data quality checks
+   - Resource management
+   - Exception handling and logging
+
+### 9. Performance Optimization
 
 1. **Model Optimization**
    - Batch prediction support
