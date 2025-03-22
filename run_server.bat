@@ -1,3 +1,0 @@
-@echo off
-echo Starting Federated Learning Server...
-python src/server/server.py

@@ -1,153 +1,240 @@
-# Implementation Details
+# Fraud Detection System Implementation Details
 
-/*
-Key Terms Explained:
-- Neural Network: A machine learning model inspired by biological neural networks, used here for fraud detection.
-- Dense Layer: A fully connected layer where each neuron is connected to all neurons in the previous layer.
-- ReLU: Rectified Linear Unit, an activation function that helps the model learn non-linear patterns.
-- Dropout: A regularization technique that randomly deactivates neurons during training to prevent overfitting.
-- BCE Loss: Binary Cross Entropy Loss, the loss function used for binary classification problems.
-- Adam Optimizer: An optimization algorithm that adjusts the model's parameters during training.
-- Mini-batch: A subset of training data processed together to update the model.
-- Class Weights: Values that adjust the importance of different classes during training to handle imbalanced data.
-*/
+## Architecture Overview
 
-# Federated Fraud Detection System Implementation
+### 1. System Components
 
-## Overview
-This implementation demonstrates a federated learning approach to fraud detection, allowing multiple banks to collaboratively train a fraud detection model while keeping their transaction data private. The system uses the Flower (flwr) framework for federated learning and PyTorch for the underlying machine learning model.
+1. **API Layer (FastAPI)**
+   - RESTful endpoints for data processing and predictions
+   - Authentication and rate limiting
+   - Request validation and error handling
+   - Asynchronous training support
 
-## System Architecture
+2. **ML Pipeline**
+   - Data preprocessing and feature engineering
+   - Model training and evaluation
+   - Prediction generation
+   - Model and scaler persistence
 
-### 1. Data Distribution
-- Each client (bank) receives a portion of the dataset
-- Data split: 80% training, 20% testing for each client
-- Current implementation handles 3 clients with equal data distribution
+3. **Storage Layer**
+   - File-based storage for uploaded data
+   - Model and scaler persistence
+   - Training logs and metrics
 
-### 2. Fraud Detection Criteria
-Transaction flagging uses a weighted scoring system:
+### 2. Model Architecture
+
+The fraud detection model uses a neural network implemented in PyTorch:
+
 ```python
-fraud_score = (
-    2.0 * (High Transaction Amount) +    # Strong indicator
-    1.5 * (Multiple Login Attempts) +    # Very important
-    1.0 * (Long Transaction Duration) +  # Moderate indicator
-    1.5 * (Low Account Balance)          # Important context
-)
-```
-- Fraud threshold: 2.5 (requires multiple strong indicators)
-- Results in approximately 3.90% fraud rate in the dataset
-
-### 3. Model Architecture
-The neural network model (`FraudDetector`) processes 5 key features:
-1. Transaction Amount (highest weight)
-2. Login Attempts
-3. Account Balance
-4. Transaction Duration
-5. Customer Age
-
-## Training Process
-
-### 1. Local Training (Per Client)
-- **Batch Size**: 32 transactions
-- **Maximum Epochs**: 10
-- **Early Stopping**:
-  - Patience: 2 epochs
-  - Monitors: Training loss
-  - Prevents overfitting
-- **Loss Function**: Binary Cross-Entropy with Logits
-  - Includes class weight adjustment for imbalanced data
-  - Weight calculation: `min(((1 - fraud_rate) / fraud_rate) * 0.5, 10.0)`
-
-### 2. Federated Learning Rounds
-- Server aggregates model updates from all clients
-- Each round consists of:
-  1. Server distributes global model
-  2. Clients train locally
-  3. Clients evaluate performance
-  4. Server aggregates updates
-
-## Evaluation Metrics
-
-### 1. Threshold Selection
-- Tests thresholds between 0.3 and 0.9
-- Optimizes for balanced performance:
-  - Minimum recall: 40%
-  - Minimum precision: 10%
-- Fallback mechanism if minimum requirements not met
-
-### 2. Performance Metrics
-Latest results show strong performance:
-
-**Client 0 (Final Round)**:
-- Accuracy: 93.45% → Overall correct predictions
-- Balanced Accuracy: 96.65% → Equal consideration of fraud and non-fraud
-- Precision: 26.67% → When flagged as fraud, correct 27% of the time
-- Recall: 100% → Caught all actual fraud cases
-- F1 Score: 42.11% → Balance between precision and recall
-- Specificity: 93.29% → Correctly identified most legitimate transactions
-
-**Client 2 (Final Round)**:
-- Accuracy: 95.24%
-- Balanced Accuracy: 83.85%
-- Precision: 45.45%
-- Recall: 71.43%
-- F1 Score: 55.56%
-- Specificity: 96.27%
-
-## Implementation Highlights
-
-### 1. Class Imbalance Handling
-- Weighted loss function
-- Dynamic threshold selection
-- Balanced accuracy metrics
-
-### 2. Early Stopping Logic
-```python
-if avg_epoch_loss < best_loss:
-    best_loss = avg_epoch_loss
-    patience_counter = 0
-else:
-    patience_counter += 1
-    if patience_counter >= patience:
-        break
+class FraudDetector(nn.Module):
+    def __init__(self):
+        super(FraudDetector, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(5, 32),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(16, 8),
+            nn.ReLU(),
+            nn.Linear(8, 1),
+            nn.Sigmoid()
+        )
 ```
 
-### 3. Metric Calculation
-- True Positives (TP): Correctly identified fraud
-- False Positives (FP): Incorrectly flagged as fraud
-- True Negatives (TN): Correctly identified normal transactions
-- False Negatives (FN): Missed fraud cases
+Key features:
+- 5 input features (normalized transaction attributes)
+- 3 hidden layers with dropout for regularization
+- Sigmoid activation for binary classification
+- BCELoss for training
 
-Derived metrics:
-- Precision = TP / (TP + FP)
-- Recall = TP / (TP + FN)
-- Specificity = TN / (TN + FP)
-- Balanced Accuracy = (Recall + Specificity) / 2
-- F1 Score = 2 * (Precision * Recall) / (Precision + Recall)
+### 3. Data Processing Pipeline
 
-## Privacy Considerations
-1. Data never leaves client premises
-2. Only model parameters are shared
-3. Each client maintains data independence
-4. No raw transaction data is exposed
+1. **Feature Engineering**
+   - Robust scaling for numerical features
+   - Feature importance weighting
+   - Automated missing value handling
+   - Outlier detection and handling
 
-## Future Improvements
-1. Dynamic class weight adjustment
-2. More sophisticated feature engineering
-3. Adaptive learning rates
-4. Extended feature set
-5. Anomaly detection pre-processing
+2. **Data Validation**
+   - Schema validation
+   - Data type checking
+   - Range validation
+   - Missing value detection
 
-## Running the System
-1. Start the server:
-   ```bash
-   python src/server/server.py
+3. **Feature Normalization**
+   ```python
+   def _normalize_features(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
+       numerical_features = [
+           'TransactionAmount',
+           'TransactionDuration',
+           'AccountBalance',
+           'CustomerAge'
+       ]
+
+       scaling_params = {}
+       for feature in numerical_features:
+           median = df[feature].median()
+           q1 = df[feature].quantile(0.25)
+           q3 = df[feature].quantile(0.75)
+           iqr = q3 - q1
+
+           scaling_params[feature] = {
+               'median': median,
+               'iqr': iqr
+           }
+
+           df[f'{feature}_normalized'] = (df[feature] - median) / iqr
+
+       return df, scaling_params
    ```
 
-2. Start each client (in separate terminals):
-   ```bash
-   python src/client/client.py --client_id [0-2] --num_clients 3 --data_path data/bank_transactions_data.csv
+### 4. Model Management
+
+1. **Model Persistence**
+   - Models saved in `/app/models` directory
+   - Versioning support for model files
+   - Automatic backup before updates
+   ```python
+   def save_model(self):
+       self.model.save(self.model_path)
+       joblib.dump(self.scaler, str(self.scaler_path))
    ```
 
-## Conclusion
-The system demonstrates effective fraud detection while maintaining data privacy through federated learning. The balanced approach between precision and recall makes it suitable for real-world deployment, with the flexibility to adjust thresholds based on specific business requirements.
+2. **Scaler Handling**
+   - StandardScaler for feature normalization
+   - Persistent storage in models directory
+   - Automatic reloading on prediction
+   ```python
+   if self.scaler is None:
+       if not self.scaler_path.exists():
+           raise ValueError(f"No scaler found at {str(self.scaler_path)}")
+       self.scaler = joblib.load(str(self.scaler_path))
+   ```
+
+3. **Training Management**
+   - Asynchronous training support
+   - Progress monitoring
+   - Early stopping implementation
+   - Training status persistence
+
+### 5. Docker Deployment
+
+1. **Container Configuration**
+   ```dockerfile
+   FROM python:3.8-slim
+
+   ENV PYTHONDONTWRITEBYTECODE=1 \
+       PYTHONUNBUFFERED=1 \
+       CUDA_VISIBLE_DEVICES="" \
+       FORCE_CPU=1
+
+   WORKDIR /app
+
+   # Create directories with proper permissions
+   RUN mkdir -p /app/uploads /app/models /app/data && \
+       chmod 777 /app/models
+
+   # Create non-root user
+   RUN useradd -m -u 1000 appuser && \
+       chown -R appuser:appuser /app
+
+   USER appuser
+   ```
+
+2. **Volume Management**
+   - Persistent storage for models
+   - Data volume for uploads
+   - Log volume for monitoring
+   ```yaml
+   volumes:
+     - ./models:/app/models
+     - ./data:/app/data
+     - ./logs:/app/logs
+   ```
+
+3. **Security Considerations**
+   - Non-root user execution
+   - Minimal base image
+   - Environment variable management
+   - Volume permission handling
+
+### 6. Error Handling
+
+1. **Validation Errors**
+   - Input data validation
+   - Feature range checking
+   - Missing value detection
+   ```python
+   def validate_features(self, X: np.ndarray) -> Tuple[bool, str]:
+       if X.shape[1] != self.input_dim:
+           return False, f"Expected {self.input_dim} features"
+       if not np.isfinite(X).all():
+           return False, "Input contains NaN or infinite values"
+       return True, "Validation successful"
+   ```
+
+2. **Model Errors**
+   - Training failures
+   - Prediction errors
+   - Resource unavailability
+   ```python
+   try:
+       predictions = self.model(X)
+   except Exception as e:
+       logger.error(f"Prediction error: {str(e)}")
+       raise ValueError(f"Failed to generate predictions: {str(e)}")
+   ```
+
+3. **System Errors**
+   - File I/O errors
+   - Memory issues
+   - GPU availability
+   ```python
+   try:
+       self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+   except Exception as e:
+       logger.warning(f"GPU error: {str(e)}. Falling back to CPU.")
+       self.device = torch.device('cpu')
+   ```
+
+### 7. Monitoring and Logging
+
+1. **Application Metrics**
+   - Request latency
+   - Error rates
+   - Model performance
+   - Resource utilization
+
+2. **Model Metrics**
+   - Training loss
+   - Validation metrics
+   - Prediction distribution
+   - Feature importance
+
+3. **System Metrics**
+   - CPU/Memory usage
+   - Disk I/O
+   - Network traffic
+   - Container health
+
+### 8. Performance Optimization
+
+1. **Model Optimization**
+   - Batch prediction support
+   - CPU/GPU optimization
+   - Memory management
+   - Caching strategy
+
+2. **API Optimization**
+   - Async processing
+   - Connection pooling
+   - Response compression
+   - Rate limiting
+
+3. **Storage Optimization**
+   - File cleanup
+   - Data archival
+   - Cache management
+   - Volume monitoring
